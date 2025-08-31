@@ -17,8 +17,11 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"sync"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/spf13/afero"
 )
 
 var secureSettings = [][2]string{
@@ -72,12 +75,57 @@ var secureSettings = [][2]string{
 type Signer struct {
 	rsaPub  *x509.Certificate
 	rsaPriv *rsa.PrivateKey
-	cert    []byte
+
+	fs       afero.Fs
+	certPath string
+	keyPath  string
+	mu       sync.RWMutex
 }
 
-func NewSigner(cert, key string) (*Signer, error) {
+func New(cert, key string, opts ...SignerOption) (*Signer, error) {
+	s := &Signer{
+		certPath: cert,
+		keyPath:  key,
+		fs:       afero.NewOsFs(),
+	}
+
+	// set options
+	for _, o := range opts {
+		o(s)
+	}
+
+	// load keypair
+	if err := s.loadKeypair(); err != nil {
+		return nil, fmt.Errorf("could not load key pair: %w", err)
+	}
+
+	return s, nil
+}
+
+func (s *Signer) loadKeypair() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// parse cert
-	b, err := os.ReadFile(cert)
+	rsaPub, err := s.parseCert()
+	if err != nil {
+		return err
+	}
+
+	// parse key
+	rsaPriv, err := s.parseKey()
+	if err != nil {
+		return err
+	}
+
+	s.rsaPub = rsaPub
+	s.rsaPriv = rsaPriv
+
+	return nil
+}
+
+func (s *Signer) parseCert() (*x509.Certificate, error) {
+	b, err := afero.ReadFile(s.fs, s.certPath)
 	if err != nil {
 		return nil, err
 	}
@@ -91,21 +139,44 @@ func NewSigner(cert, key string) (*Signer, error) {
 		return nil, err
 	}
 
-	// parse key
-	rsaPriv, err := parseKey(key)
+	return rsaPub, nil
+}
+
+func (s *Signer) parseKey() (*rsa.PrivateKey, error) {
+	b, err := afero.ReadFile(s.fs, s.keyPath)
 	if err != nil {
 		return nil, err
 	}
+	kblock, _ := pem.Decode(b)
+	if kblock == nil {
+		return nil, fmt.Errorf("could not decode PEM key")
+	}
 
-	return &Signer{
-		rsaPub:  rsaPub,
-		rsaPriv: rsaPriv,
-		cert:    cblock.Bytes,
-	}, nil
+	switch kblock.Type {
+	case "RSA PRIVATE KEY":
+		return x509.ParsePKCS1PrivateKey(kblock.Bytes)
+	case "PRIVATE KEY":
+		key, err := x509.ParsePKCS8PrivateKey(kblock.Bytes)
+		if err != nil {
+			return nil, err
+		}
+
+		if rsaKey, ok := key.(*rsa.PrivateKey); ok {
+			return rsaKey, nil
+		}
+
+		return nil, fmt.Errorf("key was not and RSA private key")
+	}
+
+	return nil, fmt.Errorf("could not parse private key")
 }
 
-func (s *Signer) SignRdp(content string) ([]byte, error) {
+func (s *Signer) Sign(content string) ([]byte, error) {
 	var settings, signnames, signlines, optionlines []string
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	fulladdress := ""
 	alternatefulladdress := ""
 
@@ -313,7 +384,7 @@ func (s *Signer) signDataSha256(data []byte) ([]byte, error) {
 		Version:          1,
 		DigestAlgorithms: digestAlgorithmIdentifiers{digestAlgo},
 		ContentInfo:      contentInfo,
-		Certificate:      asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: s.cert},
+		Certificate:      asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: s.rsaPub.Raw},
 		SignerInfos:      signerInfos{signer},
 	}
 	sobj := SignedDataObject{
@@ -382,4 +453,12 @@ func convertToUTF16le(str string) ([]byte, error) {
 		n++
 	}
 	return bbuf, nil
+}
+
+type SignerOption func(*Signer)
+
+func WithFs(fs afero.Fs) SignerOption {
+	return func(s *Signer) {
+		s.fs = fs
+	}
 }

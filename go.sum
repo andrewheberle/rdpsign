@@ -1,2 +1,4 @@
-gitee.com/cyberkylin/rdpsign/src/pkcs7 v0.0.0-20230221013737-8212a2706330 h1:bwplP0L1QfcWmnmaltZ0UK3UjMujD09jzlmV5as+X6c=
-gitee.com/cyberkylin/rdpsign/src/pkcs7 v0.0.0-20230221013737-8212a2706330/go.mod h1:hVclIqen75ltAiHsPEyOC4NNJmDrjE/QTqjhJZzYMoI=
+github.com/spf13/afero v1.14.0 h1:9tH6MapGnn/j0eb0yIXiLjERO8RB6xIVZRDCX7PtqWA=
+github.com/spf13/afero v1.14.0/go.mod h1:acJQ8t0ohCGuMN3O+Pv0V0hgMxNYDlvdk+VTfyZmbYo=
+golang.org/x/text v0.23.0 h1:D71I7dUrlY+VX0gQShAThNGHFxZ13dGLBHQLVl1mJlY=
+golang.org/x/text v0.23.0/go.mod h1:/BLNzu4aZCJ1+kcD0DNRotWKage4q2rGVAg4o22unh4=
